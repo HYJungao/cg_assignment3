@@ -45,11 +45,14 @@ public:
 	int getRayCount() { return m_rayCount; }
 
 private:
+    std::unique_ptr<BvhNode> constructBvhSahOptimalDim(size_t start, size_t end);
+    RaycastResult intersect(const BvhNode& node, const Vec3f& orig, const Vec3f& dir, const Vec3f& normDir, const Vec3f& invDir) const;
 	mutable std::atomic<int> m_rayCount;
+    Bvh m_bvh;
+    std::vector<uint32_t>* m_indices;
     // YOUR CODE HERE (R1):
     // This is the library implementation of the ray tracer.
     // Remove this once you have integrated your own ray tracer.
-    std::unique_ptr<rtlib::RayTracer> m_rt;
     
     // Bvh m_bvh; // Replace the above with your own Bvh and whatever other member variables you have
 };

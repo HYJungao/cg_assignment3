@@ -7,7 +7,7 @@
 #include "base/Math.hpp"
 
 #include <iostream>
-
+#include <array>
 
 namespace FW {
 
@@ -34,6 +34,36 @@ struct AABB {
     inline F32 area() const {
         Vec3f d(max - min);
         return 2 * (d.x * d.y + d.x * d.z + d.y * d.z);
+    }
+
+    inline bool intersect(const Vec3f& orig, const Vec3f& invDir,
+        const std::array<bool, 3>& dirIsNeg) const
+    {
+        Vec3f tMin = (min - orig) * invDir;
+        Vec3f tMax = (max - orig) * invDir;
+
+        if (!dirIsNeg.at(0)) {
+            std::swap(tMin.x, tMax.x);
+        }
+
+        if (!dirIsNeg.at(1)) {
+            std::swap(tMin.y, tMax.y);
+        }
+
+        if (!dirIsNeg.at(2)) {
+            std::swap(tMin.z, tMax.z);
+        }
+
+        float t_enter = std::max(tMin.x, std::max(tMin.y, tMin.z));
+        float t_exit = std::min(tMax.x, std::min(tMax.y, tMax.z));
+
+        if (t_enter <= t_exit && t_exit >= 0) {
+            return true;
+        }
+        else {
+            return false;
+        }
+
     }
 };
 

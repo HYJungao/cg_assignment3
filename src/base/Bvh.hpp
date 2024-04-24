@@ -33,6 +33,11 @@ public:
 
 	uint32_t			getIndex(uint32_t index) const { return indices_[index]; }
 
+    void setRoot(std::unique_ptr<BvhNode> node) { rootNode_ = std::move(node); }
+
+    std::vector<uint32_t>& getIndices() { return indices_; }
+    const std::vector<uint32_t>& getIndices() const { return indices_; }
+
 private:
 
 
