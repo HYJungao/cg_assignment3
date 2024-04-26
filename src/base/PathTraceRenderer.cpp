@@ -21,6 +21,72 @@ namespace FW {
 		// Read value from albedo texture into diffuse.
 	    // If textured, use the texture; if not, use Material.diffuse.
 	    // Note: You can probably reuse parts of the radiosity assignment.
+        Vec2f uv0 = hit.tri->m_vertices[0].t;
+        Vec2f uv1 = hit.tri->m_vertices[1].t;
+        Vec2f uv2 = hit.tri->m_vertices[2].t;
+
+        Vec2f uv = (1 - hit.u - hit.v) * uv0 + hit.u * uv1 + hit.v * uv2;
+
+        Texture& diffuseTex = mat->textures[MeshBase::TextureType_Diffuse];
+        if (diffuseTex.exists())
+        {
+            const Image& img = *diffuseTex.getImage();
+            Vec2i texelCoords = getTexelCoords(uv, img.getSize());
+            diffuse = img.getVec4f(texelCoords).getXYZ();
+
+            diffuse.x = pow(diffuse.x, 2.2f);
+            diffuse.y = pow(diffuse.y, 2.2f);
+            diffuse.z = pow(diffuse.z, 2.2f);
+        }
+        else {
+            diffuse = hit.tri->m_material->diffuse.getXYZ();
+        }
+
+        Texture& normalTex = mat->textures[MeshBase::TextureType_Normal];
+        if (normalTex.exists() && m_normalMapped)
+        {
+            const Image& img = *normalTex.getImage();
+            Vec2i texelCoords = getTexelCoords(uv, img.getSize());
+            Vec3f norm = img.getVec4f(texelCoords).getXYZ() * 2.0f - 1.0f;
+
+            Vec3f deltaPos1 = hit.tri->m_vertices[1].p - hit.tri->m_vertices[0].p;
+            Vec3f deltaPos2 = hit.tri->m_vertices[2].p - hit.tri->m_vertices[0].p;
+
+            Vec2f deltaUV1 = uv1 - uv0;
+            Vec2f deltaUV2 = uv2 - uv0;
+
+            float r = 1.0f / (deltaUV1.x * deltaUV2.y - deltaUV1.y * deltaUV2.x);
+            Vec3f t = ((deltaPos1 * deltaUV2.y - deltaPos2 * deltaUV1.y) * r).normalized();
+            Vec3f b = ((deltaPos2 * deltaUV1.x - deltaPos1 * deltaUV2.x) * r).normalized();
+
+            Mat3f tbn;
+
+            tbn.col(0) = t;
+            tbn.col(1) = b;
+            tbn.col(2) = n;
+
+            n = (tbn * norm).normalized();
+        }
+        else
+        {
+            Vec3f n0 = hit.tri->m_vertices[0].n;
+            Vec3f n1 = hit.tri->m_vertices[1].n;
+            Vec3f n2 = hit.tri->m_vertices[2].n;
+
+            n = (1 - hit.u - hit.v) * n0 + hit.u * n1 + hit.v * n2;
+        }
+
+        Texture& specularTex = mat->textures[MeshBase::TextureType_Specular];
+        if (specularTex.exists())
+        {
+            const Image& img = *specularTex.getImage();
+            Vec2i texelCoords = getTexelCoords(uv, img.getSize());
+            specular = img.getVec4f(texelCoords).getXYZ();
+        }
+        else
+        {
+            specular = hit.tri->m_material->specular;
+        }
 	}
 
 
@@ -105,13 +171,54 @@ Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerConte
 	Vec3f Ei;
 	Vec3f throughput(1, 1, 1);
 	float p = 1.0f;
+    float revPI = (1 / FW_PI);
 
 	if (result.tri != nullptr)
 	{
 		// YOUR CODE HERE (R2-R4):
 		// Implement path tracing with direct light and shadows, scattering and Russian roulette.
+        Vec3f diffuse;
+        Vec3f n;
+        Vec3f specular;
+        getTextureParameters(result, diffuse, n, specular);
+        
+        int r = 10;
+        float lightPdf;
+        Vec3f lightHitPoint;
+        light->sampleHalton(lightPdf, lightHitPoint, 2, 3, r);
+        Vec3f hit2Light = lightHitPoint - result.point;
+        RaycastResult blockCheck = rt->raycast(result.point + n * 0.0001, hit2Light);
+        if (blockCheck.tri == nullptr) {
+            float cosTheta = FW::clamp(FW::dot(-hit2Light.normalized(), ctx.m_light->getNormal()), 0.0f, 1.0f);
+            float cosThetaY = FW::clamp(FW::dot(hit2Light.normalized(), n), 0.0f, 1.0f);
 
-		Ei = result.tri->m_material->diffuse.getXYZ(); // placeholder
+            Vec3f L = hit2Light.normalized();
+            Vec3f V = -Rd.normalized();
+            Vec3f H = (V + L).normalized();
+
+            float NoV = FW::abs(FW::dot(n, V));
+            float NoL = FW::clamp(FW::dot(n, L), 0.0f, 1.0f);
+            float LoH = FW::clamp(FW::dot(L, H), 0.0f, 1.0f);
+            float NoH = FW::clamp(FW::dot(n, H), 0.0f, 1.0f);
+            
+            float roughness = result.tri->m_material->glossiness / 255;
+            float fd90 = 0.6 * roughness + 2.f * LoH * LoH * roughness;
+            float lightScatter = 1.f + (fd90 - 1.f) * FW::pow(1.f - NoL, 5.f);
+            float viewScatter = 1.f + (fd90 - 1.f) * FW::pow(1.f - NoV, 5.f);
+            diffuse = diffuse * revPI * lightScatter * viewScatter * ((1 - roughness) * 1 + roughness * (1 / 1.51));
+
+            Vec3f FS0 = (1 - roughness) * (specular * specular) * 0.16 + roughness * diffuse;
+            Vec3f F = FS0 + (fd90 - FS0) * FW::pow(1.f - LoH, 5.f);
+            float alphaG2 = roughness * roughness;
+            float Lambda_GGXV = NoL * sqrt((-NoV * alphaG2 + NoV) * NoV + alphaG2);
+            float Lambda_GGXL = NoV * sqrt((-NoL * alphaG2 + NoL) * NoL + alphaG2);
+            float Vis = 0.5f / (Lambda_GGXV + Lambda_GGXL);
+            float f = (NoH * alphaG2 - NoH) * NoH + 1;
+            float D = alphaG2 / (f * f);
+            specular = D * F * Vis * revPI;
+
+            Ei += throughput * (diffuse + specular) * ctx.m_light->getEmission() * cosTheta * cosThetaY / (hit2Light.lenSqr() * lightPdf);
+        }
 
 
 		if (debugVis)
