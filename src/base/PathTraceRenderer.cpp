@@ -118,6 +118,36 @@ PathTraceRenderer::~PathTraceRenderer()
     stop();
 }
 
+Vec3f PathTraceRenderer::evalMat(const Vec3f& diffuse, const Vec3f& specular, const Vec3f& n, float revPI, const Vec3f& hit2Light, const Vec3f& Rd, float glossiness)
+{
+    Vec3f L = hit2Light.normalized();
+    Vec3f V = -Rd.normalized();
+    Vec3f H = (V + L).normalized();
+
+    float NoV = FW::abs(FW::dot(n, V));
+    float NoL = FW::clamp(FW::dot(n, L), 0.0f, 1.0f);
+    float LoH = FW::clamp(FW::dot(L, H), 0.0f, 1.0f);
+    float NoH = FW::clamp(FW::dot(n, H), 0.0f, 1.0f);
+
+    float roughness = glossiness / 255;
+    float fd90 = 0.6 * roughness + 2.f * LoH * LoH * roughness;
+    float lightScatter = 1.f + (fd90 - 1.f) * FW::pow(1.f - NoL, 5.f);
+    float viewScatter = 1.f + (fd90 - 1.f) * FW::pow(1.f - NoV, 5.f);
+    Vec3f diffuseBRDF = diffuse * revPI * lightScatter * viewScatter * ((1 - roughness) * 1 + roughness * (1 / 1.51));
+
+    Vec3f FS0 = (1 - roughness) * (specular * specular) * 0.16 + roughness * diffuse;
+    Vec3f F = FS0 + (fd90 - FS0) * FW::pow(1.f - LoH, 5.f);
+    float alphaG2 = roughness * roughness;
+    float Lambda_GGXV = NoL * sqrt((-NoV * alphaG2 + NoV) * NoV + alphaG2);
+    float Lambda_GGXL = NoV * sqrt((-NoL * alphaG2 + NoL) * NoL + alphaG2);
+    float Vis = 0.5f / (Lambda_GGXV + Lambda_GGXL);
+    float f = (NoH * alphaG2 - NoH) * NoH + 1;
+    float D = alphaG2 / (f * f);
+    Vec3f specularBRDF = D * F * Vis * revPI;
+
+    return (diffuseBRDF + specularBRDF);
+}
+
 // This function traces a single path and returns the resulting color value that will get rendered on the image. 
 // Filling in the blanks here is all you need to do this time around.
 Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerContext& ctx, int samplerBase, Random& R, std::vector<PathVisualizationNode>& visualization)
@@ -189,35 +219,10 @@ Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerConte
         Vec3f hit2Light = lightHitPoint - result.point;
         RaycastResult blockCheck = rt->raycast(result.point + n * 0.0001, hit2Light);
         if (blockCheck.tri == nullptr) {
-            float cosTheta = FW::clamp(FW::dot(-hit2Light.normalized(), ctx.m_light->getNormal()), 0.0f, 1.0f);
+            float cosTheta = FW::clamp(FW::dot(-hit2Light.normalized(), light->getNormal()), 0.0f, 1.0f);
             float cosThetaY = FW::clamp(FW::dot(hit2Light.normalized(), n), 0.0f, 1.0f);
 
-            Vec3f L = hit2Light.normalized();
-            Vec3f V = -Rd.normalized();
-            Vec3f H = (V + L).normalized();
-
-            float NoV = FW::abs(FW::dot(n, V));
-            float NoL = FW::clamp(FW::dot(n, L), 0.0f, 1.0f);
-            float LoH = FW::clamp(FW::dot(L, H), 0.0f, 1.0f);
-            float NoH = FW::clamp(FW::dot(n, H), 0.0f, 1.0f);
-            
-            float roughness = result.tri->m_material->glossiness / 255;
-            float fd90 = 0.6 * roughness + 2.f * LoH * LoH * roughness;
-            float lightScatter = 1.f + (fd90 - 1.f) * FW::pow(1.f - NoL, 5.f);
-            float viewScatter = 1.f + (fd90 - 1.f) * FW::pow(1.f - NoV, 5.f);
-            diffuse = diffuse * revPI * lightScatter * viewScatter * ((1 - roughness) * 1 + roughness * (1 / 1.51));
-
-            Vec3f FS0 = (1 - roughness) * (specular * specular) * 0.16 + roughness * diffuse;
-            Vec3f F = FS0 + (fd90 - FS0) * FW::pow(1.f - LoH, 5.f);
-            float alphaG2 = roughness * roughness;
-            float Lambda_GGXV = NoL * sqrt((-NoV * alphaG2 + NoV) * NoV + alphaG2);
-            float Lambda_GGXL = NoV * sqrt((-NoL * alphaG2 + NoL) * NoL + alphaG2);
-            float Vis = 0.5f / (Lambda_GGXV + Lambda_GGXL);
-            float f = (NoH * alphaG2 - NoH) * NoH + 1;
-            float D = alphaG2 / (f * f);
-            specular = D * F * Vis * revPI;
-
-            Ei += throughput * (diffuse + specular) * ctx.m_light->getEmission() * cosTheta * cosThetaY / (hit2Light.lenSqr() * lightPdf);
+            Ei += throughput * evalMat(diffuse, specular, n, revPI, hit2Light, Rd, result.tri->m_material->glossiness) * light->getEmission() * cosTheta * cosThetaY / (hit2Light.lenSqr() * lightPdf);
         }
 
 
