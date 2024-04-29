@@ -13,6 +13,7 @@ namespace FW {
 
 	bool PathTraceRenderer::m_normalMapped = false;
 	bool PathTraceRenderer::debugVis = false;
+    float PathTraceRenderer::m_revPI = (1 / FW_PI);
 
 	void PathTraceRenderer::getTextureParameters(const RaycastResult& hit, Vec3f& diffuse, Vec3f& n, Vec3f& specular)
 	{
@@ -34,9 +35,9 @@ namespace FW {
             Vec2i texelCoords = getTexelCoords(uv, img.getSize());
             diffuse = img.getVec4f(texelCoords).getXYZ();
 
-            diffuse.x = pow(diffuse.x, 2.2f);
-            diffuse.y = pow(diffuse.y, 2.2f);
-            diffuse.z = pow(diffuse.z, 2.2f);
+            diffuse.x = powf(diffuse.x, 2.2f);
+            diffuse.y = powf(diffuse.y, 2.2f);
+            diffuse.z = powf(diffuse.z, 2.2f);
         }
         else {
             diffuse = hit.tri->m_material->diffuse.getXYZ();
@@ -118,7 +119,7 @@ PathTraceRenderer::~PathTraceRenderer()
     stop();
 }
 
-Vec3f PathTraceRenderer::evalMat(const Vec3f& diffuse, const Vec3f& specular, const Vec3f& n, float revPI, const Vec3f& hit2Light, const Vec3f& Rd, float glossiness)
+Vec3f PathTraceRenderer::evalMat(const Vec3f& diffuse, const Vec3f& specular, const Vec3f& n, const Vec3f& hit2Light, const Vec3f& Rd, float glossiness)
 {
     Vec3f L = hit2Light.normalized();
     Vec3f V = -Rd.normalized();
@@ -133,7 +134,10 @@ Vec3f PathTraceRenderer::evalMat(const Vec3f& diffuse, const Vec3f& specular, co
     float fd90 = 0.6 * roughness + 2.f * LoH * LoH * roughness;
     float lightScatter = 1.f + (fd90 - 1.f) * FW::pow(1.f - NoL, 5.f);
     float viewScatter = 1.f + (fd90 - 1.f) * FW::pow(1.f - NoV, 5.f);
-    Vec3f diffuseBRDF = diffuse * revPI * lightScatter * viewScatter * ((1 - roughness) * 1 + roughness * (1 / 1.51));
+    // there is a dark edge on object for this equation
+    // Vec3f diffuseBRDF = diffuse * m_revPI * lightScatter * viewScatter * ((1 - roughness) * 1 + roughness * (1 / 1.51));
+    Vec3f diffuseBRDF = diffuse * m_revPI;
+    return diffuseBRDF;
 
     Vec3f FS0 = (1 - roughness) * (specular * specular) * 0.16 + roughness * diffuse;
     Vec3f F = FS0 + (fd90 - FS0) * FW::pow(1.f - LoH, 5.f);
@@ -143,7 +147,7 @@ Vec3f PathTraceRenderer::evalMat(const Vec3f& diffuse, const Vec3f& specular, co
     float Vis = 0.5f / (Lambda_GGXV + Lambda_GGXL);
     float f = (NoH * alphaG2 - NoH) * NoH + 1;
     float D = alphaG2 / (f * f);
-    Vec3f specularBRDF = D * F * Vis * revPI;
+    Vec3f specularBRDF = D * F * Vis * m_revPI;
 
     return (diffuseBRDF + specularBRDF);
 }
@@ -193,51 +197,81 @@ Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerConte
 	// intersections that come _after_ the point Ro+Rd are to be discarded.
 	Rd = Rd - Ro;
 
-	// trace!
-	RaycastResult result = rt->raycast(Ro, Rd);
-	const RTTriangle* pHit = result.tri;
-
 	// if we hit something, fetch a color and insert into image
-	Vec3f Ei;
-	Vec3f throughput(1, 1, 1);
-	float p = 1.0f;
-    float revPI = (1 / FW_PI);
+    Vec3f throughput(1.f);
+	Vec3f Ei(0.f);
 
-	if (result.tri != nullptr)
-	{
-		// YOUR CODE HERE (R2-R4):
-		// Implement path tracing with direct light and shadows, scattering and Russian roulette.
+    int bounce = 0;
+    bool RR = ctx.m_bounces < 0 ? true : false;
+
+    while (bounce <= FW::abs(ctx.m_bounces) || RR) {
+        RaycastResult result = rt->raycast(Ro, Rd);
+        if (result.tri == nullptr) {
+            break;
+        }
+
+        // YOUR CODE HERE (R2-R4):
+        // Implement path tracing with direct light and shadows, scattering and Russian roulette.
         Vec3f diffuse;
         Vec3f n;
         Vec3f specular;
         getTextureParameters(result, diffuse, n, specular);
-        
-        int r = 10;
+
+        if (FW::dot(Rd, n) > 0) {
+            n = -n;
+        }
         float lightPdf;
         Vec3f lightHitPoint;
-        light->sampleHalton(lightPdf, lightHitPoint, 2, 3, r);
-        Vec3f hit2Light = lightHitPoint - result.point;
-        RaycastResult blockCheck = rt->raycast(result.point + n * 0.0001, hit2Light);
+        light->sample(lightPdf, lightHitPoint, 0, R);
+        Vec3f hit = result.point + n * 0.001;
+        Vec3f hit2Light = lightHitPoint - hit;
+        RaycastResult blockCheck = rt->raycast(hit, hit2Light);
+        Vec3f brdf = evalMat(diffuse, specular, n, hit2Light, Rd, result.tri->m_material->glossiness);
         if (blockCheck.tri == nullptr) {
-            float cosTheta = FW::clamp(FW::dot(-hit2Light.normalized(), light->getNormal()), 0.0f, 1.0f);
+            float cosTheta = FW::clamp(FW::dot(hit2Light.normalized(), -light->getNormal()), 0.0f, 1.0f);
             float cosThetaY = FW::clamp(FW::dot(hit2Light.normalized(), n), 0.0f, 1.0f);
-
-            Ei += throughput * evalMat(diffuse, specular, n, revPI, hit2Light, Rd, result.tri->m_material->glossiness) * light->getEmission() * cosTheta * cosThetaY / (hit2Light.lenSqr() * lightPdf);
+            Ei += throughput * brdf * light->getEmission() * cosTheta * cosThetaY / (hit2Light.lenSqr() * lightPdf);
         }
 
+        Mat3f B = formBasis(n);
+        float x = R.getF32(0, 1);
+        float y = R.getF32(0, 1);
+        float z = FW::abs(1.0f - 2.0f * x);
 
-		if (debugVis)
-		{
-			// Example code for using the visualization system. You can expand this to include further bounces, 
-			// shadow rays, and whatever other useful information you can think of.
-			PathVisualizationNode node;
-			node.lines.push_back(PathVisualizationLine(result.orig, result.point)); // Draws a line between two points
-			node.lines.push_back(PathVisualizationLine(result.point, result.point + result.tri->normal() * .1f, Vec3f(1,0,0))); // You can give lines a color as optional parameter.
-			node.labels.push_back(PathVisualizationLabel("diffuse: " + std::to_string(Ei.x) + ", " + std::to_string(Ei.y) + ", " + std::to_string(Ei.z), result.point)); // You can also render text labels with world-space locations.
-			
-			visualization.push_back(node);
-		}
-	}
+        float r = FW::sqrt(1.0f - z * z);
+        float phi = 2 * FW_PI * y;
+
+        Rd = B * Vec3f(r * FW::cos(phi), r * FW::sin(phi), z) * 100.f;
+        Ro = hit;
+
+        float pdf = 1 / (2 * FW_PI);
+        throughput *= brdf * FW::abs(FW::dot(n, Rd.normalized())) / (pdf + 0.00001);
+
+        if (bounce > FW::abs(ctx.m_bounces)) {
+            if (!RR) {
+                break;
+            }
+            if (R.getF32(0.f, 1.f) < 0.2f) {
+                throughput *= 1.f / 0.2f;
+            }
+            else {
+                break;
+            }
+        }
+        bounce++;
+
+        if (debugVis)
+        {
+            // Example code for using the visualization system. You can expand this to include further bounces, 
+            // shadow rays, and whatever other useful information you can think of.
+            PathVisualizationNode node;
+            node.lines.push_back(PathVisualizationLine(result.orig, result.point)); // Draws a line between two points
+            node.lines.push_back(PathVisualizationLine(result.point, result.point + result.tri->normal() * .1f, Vec3f(1, 0, 0))); // You can give lines a color as optional parameter.
+            node.labels.push_back(PathVisualizationLabel("diffuse: " + std::to_string(Ei.x) + ", " + std::to_string(Ei.y) + ", " + std::to_string(Ei.z), result.point)); // You can also render text labels with world-space locations.
+
+            visualization.push_back(node);
+        }
+    }
 
 	return Ei;
 }
