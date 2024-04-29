@@ -137,7 +137,6 @@ Vec3f PathTraceRenderer::evalMat(const Vec3f& diffuse, const Vec3f& specular, co
     // there is a dark edge on object for this equation
     // Vec3f diffuseBRDF = diffuse * m_revPI * lightScatter * viewScatter * ((1 - roughness) * 1 + roughness * (1 / 1.51));
     Vec3f diffuseBRDF = diffuse * m_revPI;
-    return diffuseBRDF;
 
     Vec3f FS0 = (1 - roughness) * (specular * specular) * 0.16 + roughness * diffuse;
     Vec3f F = FS0 + (fd90 - FS0) * FW::pow(1.f - LoH, 5.f);
