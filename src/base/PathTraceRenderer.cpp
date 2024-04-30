@@ -130,6 +130,7 @@ Vec3f PathTraceRenderer::evalMat(const Vec3f& diffuse, const Vec3f& specular, co
     float LoH = FW::clamp(FW::dot(L, H), 0.0f, 1.0f);
     float NoH = FW::clamp(FW::dot(n, H), 0.0f, 1.0f);
 
+    // It will make the scene too bright when roughness = 1 - glossiness, so glossiness from mat is treated as roughness
     float roughness = glossiness / 255;
     float fd90 = 0.6 * roughness + 2.f * LoH * LoH * roughness;
     float lightScatter = 1.f + (fd90 - 1.f) * FW::pow(1.f - NoL, 5.f);
@@ -222,14 +223,14 @@ Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerConte
         float lightPdf;
         Vec3f lightHitPoint;
         light->sample(lightPdf, lightHitPoint, 0, R);
-        Vec3f hit = result.point + n * 0.001;
+        Vec3f hit = result.point + n * 0.00001;
         Vec3f hit2Light = lightHitPoint - hit;
         RaycastResult blockCheck = rt->raycast(hit, hit2Light);
         Vec3f brdf = evalMat(diffuse, specular, n, hit2Light, Rd, result.tri->m_material->glossiness);
         if (blockCheck.tri == nullptr) {
             float cosTheta = FW::clamp(FW::dot(hit2Light.normalized(), -light->getNormal()), 0.0f, 1.0f);
             float cosThetaY = FW::clamp(FW::dot(hit2Light.normalized(), n), 0.0f, 1.0f);
-            Ei += throughput * brdf * light->getEmission() * cosTheta * cosThetaY / (hit2Light.lenSqr() * lightPdf);
+            Ei += throughput * brdf * light->getEmission() * cosTheta * cosThetaY / (hit2Light.lenSqr() * lightPdf + 0.00001);
         }
 
         Mat3f B = formBasis(n);
