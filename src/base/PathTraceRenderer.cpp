@@ -130,16 +130,16 @@ Vec3f PathTraceRenderer::evalMat(const Vec3f& diffuse, const Vec3f& specular, co
     float LoH = FW::clamp(FW::dot(L, H), 0.0f, 1.0f);
     float NoH = FW::clamp(FW::dot(n, H), 0.0f, 1.0f);
 
-    // It will make the scene too bright when roughness = 1 - glossiness, so glossiness from mat is treated as roughness
-    float roughness = glossiness / 255;
+    float roughness = 1 - glossiness / 255;
     float fd90 = 0.6 * roughness + 2.f * LoH * LoH * roughness;
     float lightScatter = 1.f + (fd90 - 1.f) * FW::pow(1.f - NoL, 5.f);
     float viewScatter = 1.f + (fd90 - 1.f) * FW::pow(1.f - NoV, 5.f);
     // there is a dark edge on object for this equation
-    // Vec3f diffuseBRDF = diffuse * m_revPI * lightScatter * viewScatter * ((1 - roughness) * 1 + roughness * (1 / 1.51));
-    Vec3f diffuseBRDF = diffuse * m_revPI;
+    Vec3f diffuseBRDF = diffuse * m_revPI * lightScatter * viewScatter * ((1 - roughness) * 1 + roughness * (1 / 1.51));
+    // Vec3f diffuseBRDF = diffuse * m_revPI;
 
-    Vec3f FS0 = (1 - roughness) * (specular * specular) * 0.16 + roughness * diffuse;
+    // Vec3f FS0 = (1 - roughness) * (specular * specular) * 0.16 + roughness * diffuse;
+    Vec3f FS0 = (1 - roughness) * diffuse + roughness * (specular * specular) * 0.16;
     Vec3f F = FS0 + (fd90 - FS0) * FW::pow(1.f - LoH, 5.f);
     float alphaG2 = roughness * roughness;
     float Lambda_GGXV = NoL * sqrt((-NoV * alphaG2 + NoV) * NoV + alphaG2);
@@ -223,7 +223,7 @@ Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerConte
         float lightPdf;
         Vec3f lightHitPoint;
         light->sample(lightPdf, lightHitPoint, 0, R);
-        Vec3f hit = result.point + n * 0.00001;
+        Vec3f hit = result.point + n * 0.0001;
         Vec3f hit2Light = lightHitPoint - hit;
         RaycastResult blockCheck = rt->raycast(hit, hit2Light);
         Vec3f brdf = evalMat(diffuse, specular, n, hit2Light, Rd, result.tri->m_material->glossiness);
@@ -234,18 +234,45 @@ Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerConte
         }
 
         Mat3f B = formBasis(n);
-        float x = R.getF32(0, 1);
-        float y = R.getF32(0, 1);
-        float z = FW::abs(1.0f - 2.0f * x);
+        if (R.getF32(0.f, 1.f) < 0.3f) {
+            float x = R.getF32(0, 1);
+            float y = R.getF32(0, 1);
+            float z = FW::abs(1.0f - 2.0f * x);
 
-        float r = FW::sqrt(1.0f - z * z);
-        float phi = 2 * FW_PI * y;
+            float r = FW::sqrt(1.0f - z * z);
+            float phi = 2 * FW_PI * y;
 
-        Rd = B * Vec3f(r * FW::cos(phi), r * FW::sin(phi), z) * 100.f;
-        Ro = hit;
+            Rd = B * Vec3f(r * FW::cos(phi), r * FW::sin(phi), z) * 100.f;
+            Ro = hit;
 
-        float pdf = 1 / (2 * FW_PI);
-        throughput *= brdf * FW::abs(FW::dot(n, Rd.normalized())) / (pdf + 0.00001);
+            float pdf = 1 / (2 * FW_PI);
+            throughput *= brdf * FW::abs(FW::dot(n, Rd.normalized())) / (pdf + 0.00001);
+        }
+        else
+        {
+            float x = R.getF32(0, 1);
+            float y = R.getF32(0, 1);
+
+            float roughness = 1 - result.tri->m_material->glossiness / 255.f;
+            float a = roughness * roughness;
+            float phi = 2 * FW_PI * x;
+            float cosTheta = sqrt((1.0 - y) / (1.0 + (a * a - 1.0) * y));
+            float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+            Vec3f H(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+            H = B * H;
+            Vec3f V = -Rd.normalized();
+            float tmpVoH = FW::max(dot(V, H), 0.0f);
+            Vec3f dir = (2.f * tmpVoH * H - V).normalized();
+
+            Rd = dir * 100.f;
+            Ro = hit;
+
+            float d = (cosTheta * a - cosTheta) * cosTheta + 1;
+            float D = a / (FW_PI * d * d);
+            float pdf = D * cosTheta;
+            pdf = pdf / (4.f * tmpVoH);
+            throughput *= brdf * FW::abs(FW::dot(n, Rd.normalized())) / (pdf + 0.00001);
+        }
 
         if (bounce > FW::abs(ctx.m_bounces)) {
             if (!RR) {
