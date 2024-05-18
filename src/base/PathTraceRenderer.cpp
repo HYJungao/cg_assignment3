@@ -342,7 +342,12 @@ void PathTraceRenderer::pathTraceBlock( MulticoreLauncher::Task& t )
         int pixel_x = block.m_x + (i % block.m_width);
         int pixel_y = block.m_y + (i / block.m_width);
 
-		Vec3f Ei = tracePath(pixel_x, pixel_y, ctx, 0, R, dummyVisualization);
+        constexpr int spp = 8;
+        Vec3f Ei(0);
+
+        for (int k = 0; k < spp; ++k) {
+            Ei += tracePath(pixel_x, pixel_y, ctx, 0, R, dummyVisualization) / spp;
+        }
 
         // Put pixel.
         Vec4f prev = image->getVec4f( Vec2i(pixel_x, pixel_y) );
