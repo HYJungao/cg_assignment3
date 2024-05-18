@@ -54,7 +54,7 @@ namespace FW {
         {
             const Image& img = *normalTex.getImage();
             Vec2i texelCoords = getTexelCoords(uv, img.getSize());
-            Vec3f norm = img.getVec4f(texelCoords).getXYZ() * 2.0f - 1.0f;
+            Vec3f norm = (img.getVec4f(texelCoords).getXYZ() * 2.0f - 1.0f).normalized();
 
             Vec3f deltaPos1 = hit.tri->m_vertices[1].p - hit.tri->m_vertices[0].p;
             Vec3f deltaPos2 = hit.tri->m_vertices[2].p - hit.tri->m_vertices[0].p;
@@ -152,7 +152,7 @@ Vec3f PathTraceRenderer::evalMat(const Vec3f& diffuse, const Vec3f& specular, co
 
 // This function traces a single path and returns the resulting color value that will get rendered on the image. 
 // Filling in the blanks here is all you need to do this time around.
-Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerContext& ctx, int samplerBase, Random& R, std::vector<PathVisualizationNode>& visualization)
+Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerContext& ctx, int samplerBase, Random& R, std::vector<PathVisualizationNode>& visualization, Vec3f& nn, Vec3f& pos)
 {
 	const MeshWithColors* scene = ctx.m_scene;
 	RayTracer* rt = ctx.m_rt;
@@ -218,10 +218,16 @@ Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerConte
         if (FW::dot(Rd, n) > 0) {
             n = -n;
         }
+
+        if (bounce == 0) {
+            nn = n;
+            pos = result.point + n * 0.001;
+        }
+
         float lightPdf;
         Vec3f lightHitPoint;
         light->sample(lightPdf, lightHitPoint, 0, R);
-        Vec3f hit = result.point + n * 0.0001;
+        Vec3f hit = result.point + n * 0.001;
         Vec3f hit2Light = lightHitPoint - hit;
         RaycastResult blockCheck = rt->raycast(hit, hit2Light);
         Vec3f brdf = evalMat(diffuse, specular, n, hit2Light, Rd, result.tri->m_material->glossiness);
@@ -240,7 +246,7 @@ Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerConte
             float r = FW::sqrt(1.0f - z * z);
             float phi = 2 * FW_PI * y;
 
-            Rd = B * Vec3f(r * FW::cos(phi), r * FW::sin(phi), z) * 100.f;
+            Rd = (*ctx.m_camera).getFar() * B * Vec3f(r * FW::cos(phi), r * FW::sin(phi), z) * 100.f;
             Ro = hit;
 
             float pdf = 1 / (2 * FW_PI);
@@ -262,7 +268,7 @@ Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerConte
             float tmpVoH = FW::max(dot(V, H), 0.0f);
             Vec3f dir = (2.f * tmpVoH * H - V).normalized();
 
-            Rd = dir * 100.f;
+            Rd = (*ctx.m_camera).getFar() * dir * 100.f;
             Ro = hit;
 
             float d = (cosTheta * a - cosTheta) * cosTheta + 1;
@@ -309,6 +315,8 @@ void PathTraceRenderer::pathTraceBlock( MulticoreLauncher::Task& t )
     const MeshWithColors* scene			= ctx.m_scene;
     RayTracer* rt						= ctx.m_rt;
     Image* image						= ctx.m_image.get();
+    Image* normal                       = ctx.m_normal.get();
+    Image* position                     = ctx.m_position.get();
     const CameraControls& cameraCtrl	= *ctx.m_camera;
     AreaLight* light					= ctx.m_light;
 
@@ -345,14 +353,20 @@ void PathTraceRenderer::pathTraceBlock( MulticoreLauncher::Task& t )
         constexpr int spp = 8;
         Vec3f Ei(0);
 
+        Vec3f n(0);
+        Vec3f pos(0);
+
         for (int k = 0; k < spp; ++k) {
-            Ei += tracePath(pixel_x, pixel_y, ctx, 0, R, dummyVisualization) / spp;
+            Ei += tracePath(pixel_x, pixel_y, ctx, 0, R, dummyVisualization, n, pos) / spp;
         }
 
         // Put pixel.
         Vec4f prev = image->getVec4f( Vec2i(pixel_x, pixel_y) );
         prev += Vec4f( Ei, 1.0f );
         image->setVec4f( Vec2i(pixel_x, pixel_y), prev );
+
+        normal->setVec4f(Vec2i(pixel_x, pixel_y), Vec4f(n, 0.f));
+        position->setVec4f(Vec2i(pixel_x, pixel_y), Vec4f(pos, 0.f));
     }
 }
 
@@ -369,9 +383,13 @@ void PathTraceRenderer::startPathTracingProcess( const MeshWithColors* scene, Ar
     m_context.m_pass = 0;
     m_context.m_bounces = bounces;
     m_context.m_image.reset(new Image( dest->getSize(), ImageFormat::RGBA_Vec4f));
+    m_context.m_normal.reset(new Image(dest->getSize(), ImageFormat::RGBA_Vec4f));
+    m_context.m_position.reset(new Image(dest->getSize(), ImageFormat::RGBA_Vec4f));
 
     m_context.m_destImage = dest;
     m_context.m_image->clear();
+    m_context.m_normal->clear();
+    m_context.m_position->clear();
 
     // Add rendering blocks.
     m_context.m_blocks.clear();
@@ -420,11 +438,52 @@ void PathTraceRenderer::updatePicture( Image* dest )
     FW_ASSERT( m_context.m_image != 0 );
     FW_ASSERT( m_context.m_image->getSize() == dest->getSize() );
 
+    int kernel = 16;
+    constexpr float inv_sigmaPlane = 1.f / (2.f * 0.1f * 0.1f);
+    constexpr float inv_sigmaColor = 1.f / (2.f * 0.6f * 0.6f);
+    constexpr float inv_sigmaNormal = 1.f / (2.f * 0.1f * 0.1f);
+    constexpr float inv_sigmaCoord = 1.f / (2.f * 32.0f * 32.0f);
+
+    #pragma omp parallel for
     for ( int i = 0; i < dest->getSize().y; ++i )
     {
         for ( int j = 0; j < dest->getSize().x; ++j )
         {
-            Vec4f D = m_context.m_image->getVec4f(Vec2i(j,i));
+            int x_start = max(0, j - kernel);
+            int x_end = min(dest->getSize().x - 1, j + kernel);
+            int y_start = max(0, i - kernel);
+            int y_end = min(dest->getSize().y - 1, i + kernel);
+
+            Vec4f cc = m_context.m_image->getVec4f(Vec2i(j, i));
+            Vec3f nn = m_context.m_normal->getVec4f(Vec2i(j, i)).getXYZ();
+            Vec3f pos = m_context.m_position->getVec4f(Vec2i(j, i)).getXYZ();
+            Vec4f D(0);
+            float D_weight = 0;
+
+            //for (int x = x_start; x <= x_end; x++) {
+            //    for (int y = y_start; y <= y_end; y++) {
+            //        Vec4f tmp_cc = m_context.m_image->getVec4f(Vec2i(x, y));
+            //        Vec3f tmp_nn = m_context.m_normal->getVec4f(Vec2i(x, y)).getXYZ();
+            //        Vec3f tmp_pos = m_context.m_position->getVec4f(Vec2i(x, y)).getXYZ();
+            //        float dis_pos = (pos - tmp_pos).lenSqr() * inv_sigmaCoord;
+            //        float dis_color = (cc - tmp_cc).lenSqr() * inv_sigmaColor;
+            //        float dis_n = acos(min(max(dot(nn, tmp_nn), 0.f), 1.f));
+            //        dis_n = dis_n * dis_n * inv_sigmaNormal;
+
+            //        float D_plane = 0;
+            //        if (dis_pos > 0.f) {
+            //            D_plane = dot(nn, (tmp_pos - pos).normalized());
+            //        }
+            //        D_plane = D_plane * D_plane * inv_sigmaPlane;
+
+            //        float weight = exp(-D_plane - dis_pos - dis_color - dis_n);
+            //        D_weight += weight;
+            //        D += tmp_cc * weight;
+            //    }
+            //}
+
+            D = D.lenSqr() == 0 ? m_context.m_image->getVec4f(Vec2i(j, i)) : D / D_weight;
+
             if ( D.w != 0.0f )
                 D = D*(1.0f/D.w);
 

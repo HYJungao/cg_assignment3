@@ -451,8 +451,10 @@ bool App::handleEvent(const Window::Event& ev)
 			m_pathtrace_renderer->debugVis = true;
 
 			Random rnd;
+			Vec3f nn;
+			Vec3f position;
 			for (int i = 0; i < m_numDebugPathCount; ++i)
-				m_pathtrace_renderer->tracePath(pos.x, pos.y, m_pathtrace_renderer->m_context, -1, rnd, m_visualization);
+				m_pathtrace_renderer->tracePath(pos.x, pos.y, m_pathtrace_renderer->m_context, -1, rnd, m_visualization, nn, position);
 
 			m_pathtrace_renderer->debugVis = false;
 			m_RTMode = false;

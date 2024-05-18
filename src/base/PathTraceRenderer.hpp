@@ -52,6 +52,8 @@ struct PathTracerContext
     int							m_pass;    ///< Pass number, increased by one for each full render iteration.
     int							m_bounces;
     std::unique_ptr<Image>		m_image;
+    std::unique_ptr<Image>      m_normal;
+    std::unique_ptr<Image>      m_position;
     Image*	                	m_destImage;
     const CameraControls*		m_camera;
 };
@@ -97,7 +99,7 @@ public:
     // negative #bounces = -N means start russian roulette from Nth bounce
     // positive N means always trace up to N bounces
     void				startPathTracingProcess				( const MeshWithColors* scene, AreaLight*, RayTracer* rt, Image* dest, int bounces, const CameraControls& camera );
-	static Vec3f				tracePath(float x, float y, PathTracerContext& ctx, int samplerBase, Random& rnd, std::vector<PathVisualizationNode>& visualization);
+	static Vec3f				tracePath(float x, float y, PathTracerContext& ctx, int samplerBase, Random& rnd, std::vector<PathVisualizationNode>& visualization, Vec3f& nn, Vec3f& pos);
 	static void			pathTraceBlock(MulticoreLauncher::Task& t);
 	static void			getTextureParameters(const RaycastResult& hit, Vec3f& diffuse, Vec3f& n, Vec3f& specular);
     void				updatePicture						( Image* display );	// normalize by 1/w
