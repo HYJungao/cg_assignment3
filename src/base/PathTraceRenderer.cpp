@@ -43,6 +43,12 @@ namespace FW {
             diffuse = hit.tri->m_material->diffuse.getXYZ();
         }
 
+        Vec3f n0 = hit.tri->m_vertices[0].n;
+        Vec3f n1 = hit.tri->m_vertices[1].n;
+        Vec3f n2 = hit.tri->m_vertices[2].n;
+
+        n = ((1 - hit.u - hit.v) * n0 + hit.u * n1 + hit.v * n2).normalized();
+
         Texture& normalTex = mat->textures[MeshBase::TextureType_Normal];
         if (normalTex.exists() && m_normalMapped)
         {
@@ -67,14 +73,6 @@ namespace FW {
             tbn.col(2) = n;
 
             n = (tbn * norm).normalized();
-        }
-        else
-        {
-            Vec3f n0 = hit.tri->m_vertices[0].n;
-            Vec3f n1 = hit.tri->m_vertices[1].n;
-            Vec3f n2 = hit.tri->m_vertices[2].n;
-
-            n = (1 - hit.u - hit.v) * n0 + hit.u * n1 + hit.v * n2;
         }
 
         Texture& specularTex = mat->textures[MeshBase::TextureType_Specular];
