@@ -246,7 +246,7 @@ Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerConte
             float r = FW::sqrt(1.0f - z * z);
             float phi = 2 * FW_PI * y;
 
-            Rd = B * Vec3f(r * FW::cos(phi), r * FW::sin(phi), z) * 10000.f;
+            Rd = (*ctx.m_camera).getFar() * B * Vec3f(r * FW::cos(phi), r * FW::sin(phi), z);
             Ro = hit;
 
             float pdf = 1 / (2 * FW_PI);
@@ -268,7 +268,7 @@ Vec3f PathTraceRenderer::tracePath(float image_x, float image_y, PathTracerConte
             float tmpVoH = FW::max(dot(V, H), 0.0f);
             Vec3f dir = (2.f * tmpVoH * H - V).normalized();
 
-            Rd = dir * 10000.f;
+            Rd = (*ctx.m_camera).getFar() * dir;
             Ro = hit;
 
             float d = (cosTheta * a - cosTheta) * cosTheta + 1;
