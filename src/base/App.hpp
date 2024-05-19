@@ -164,6 +164,10 @@ private:
 
 	std::vector<PathVisualizationNode> m_visualization;
 
+    bool                                m_JBF;
+    int                                 m_kernel;
+    int                                 m_spp;
+
 };
 
 

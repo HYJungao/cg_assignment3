@@ -48,6 +48,15 @@ App::App(std::vector<std::string>& cmd_args)
 	m_commonCtrl.addStateObject(this);
 	m_cameraCtrl.setKeepAligned(true);
 
+	m_JBF = false;
+	m_kernel = 8;
+	m_spp = 8;
+	m_commonCtrl.addToggle(&m_JBF, FW_KEY_NONE, "Enable Joint Bilateral Filtering(slow)");
+	m_commonCtrl.beginSliderStack();
+	m_commonCtrl.addSlider(&m_kernel, 1, 64, false, FW_KEY_NONE, FW_KEY_NONE, "Kernel Size of Joint Bilateral Filtering= %d", 0, &clear_on_next_frame);
+	m_commonCtrl.addSlider(&m_spp, 1, 512, false, FW_KEY_NONE, FW_KEY_NONE, "Sample Per Pixel= %f", 0, &clear_on_next_frame);
+	m_commonCtrl.endSliderStack();
+
 	m_commonCtrl.addButton((S32*)&m_action, Action_LoadMesh, FW_KEY_M, "Load mesh or state... (M)");
 	m_commonCtrl.addButton((S32*)&m_action, Action_ReloadMesh, FW_KEY_F5, "Reload mesh (F5)");
 	m_commonCtrl.addButton((S32*)&m_action, Action_SaveMesh, FW_KEY_O, "Save mesh... (O)");
@@ -429,6 +438,9 @@ bool App::handleEvent(const Window::Event& ev)
 				new (&m_img) Image(m_window.getSize(), ImageFormat::RGBA_Vec4f);	// placement new, will get autodestructed
 			}
 			m_pathtrace_renderer->setNormalMapped(m_normalMapped);
+			m_pathtrace_renderer->setJBF(m_JBF);
+			m_pathtrace_renderer->setKernel(m_kernel);
+			m_pathtrace_renderer->setSPP(m_spp);
 			m_pathtrace_renderer->startPathTracingProcess(m_mesh.get(), m_areaLight.get(), m_rt.get(), &m_img, m_useRussianRoulette ? -m_numBounces : m_numBounces, m_cameraCtrl);
 		}
 		else

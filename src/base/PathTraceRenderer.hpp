@@ -108,6 +108,9 @@ public:
 	void				setNormalMapped						( bool b ){ m_normalMapped = b; }
 
     static Vec3f evalMat(const Vec3f& diffuse, const Vec3f& specular, const Vec3f& n, const Vec3f& hit2Light, const Vec3f& Rd, float glossiness);
+    void				setJBF(bool b) { m_JBF = b; }
+    void				setKernel(int b) { m_kernel = b; }
+    void				setSPP(int b) { m_spp = b; }
 
 protected:
     __int64						m_s64TotalRays;
@@ -115,6 +118,10 @@ protected:
 
     MulticoreLauncher			m_launcher;
 	static bool					m_normalMapped;
+
+    static bool					m_JBF;
+    static int                  m_kernel;
+    static int                  m_spp;
 
     static float                m_revPI;
 };
