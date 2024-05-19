@@ -3,8 +3,8 @@
 #
 # Assignment 3: Path Tracing
 
-Student name:
-Student number:
+Student name: Huang Yaojun
+Student number: 101627324
 
 # Which parts of the assignment did you complete? Mark them 'done'.
 # You can also mark non-completed parts as 'attempted' if you spent a fair amount of
@@ -33,7 +33,7 @@ No
 # Are there any known problems/bugs remaining in your code?
 
 1. The joint bilateral filtering is slow since it keeps updating every frame, and creates blur effect with textures(although it gradually becomes clear as the scene converge), 
-this can be solved by applying demodulate albedo technique, using another algorithm can also make the filter faster.
+this can be solved by applying demodulate albedo technique, using another algorithm can also make the filter faster. What's more, the current implementation processes the image every frame, but it is better to do the process at final pass.
 
 2. The normal mapping works in cornell_chesterfield but creates dark spot/noise in crytek-sponza, the cause in still being investigated.
 
