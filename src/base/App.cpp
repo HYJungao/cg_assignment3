@@ -54,7 +54,7 @@ App::App(std::vector<std::string>& cmd_args)
 	m_commonCtrl.addToggle(&m_JBF, FW_KEY_NONE, "Enable Joint Bilateral Filtering(slow)");
 	m_commonCtrl.beginSliderStack();
 	m_commonCtrl.addSlider(&m_kernel, 1, 64, false, FW_KEY_NONE, FW_KEY_NONE, "Kernel Size of Joint Bilateral Filtering= %d", 0, &clear_on_next_frame);
-	m_commonCtrl.addSlider(&m_spp, 1, 512, false, FW_KEY_NONE, FW_KEY_NONE, "Sample Per Pixel= %f", 0, &clear_on_next_frame);
+	m_commonCtrl.addSlider(&m_spp, 1, 512, false, FW_KEY_NONE, FW_KEY_NONE, "Sample Per Pixel= %d", 0, &clear_on_next_frame);
 	m_commonCtrl.endSliderStack();
 
 	m_commonCtrl.addButton((S32*)&m_action, Action_LoadMesh, FW_KEY_M, "Load mesh or state... (M)");
